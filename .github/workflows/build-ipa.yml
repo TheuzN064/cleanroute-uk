@@ -21,16 +21,20 @@ jobs:
           cache: 'npm'
 
       - name: 3. Install Node Dependencies
-        run: npm ci || npm install
+        run: npm install --legacy-peer-deps
 
-      - name: 4. Generate Native iOS Project with Expo
-        run: npx expo prebuild --platform ios --clean
+      - name: 4. Generate Native iOS Project and Install Pods
+        run: |
+          npx expo prebuild --platform ios --clean
+          cd ios
+          pod install
 
       - name: 5. Build and Package Unsigned IPA
         run: |
           cd ios
+          ls -la
           WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
-          SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
+          SCHEME=$(basename "$WORKSPACE" .xcworkspace)
           echo "Building Workspace: $WORKSPACE with Scheme: $SCHEME"
 
           xcodebuild archive \
