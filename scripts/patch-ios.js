@@ -141,5 +141,21 @@ if (fs.existsSync(buildXcframeworkScriptPath)) {
   console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh (BUILD_LIBRARY_FOR_DISTRIBUTION=NO and resilient header copy)');
 }
 
+// 5. Patch expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h
+// Clang in Xcode 16 / Swift 6.0 rejects SWIFT_RETURNS_RETAINED on constructors (constructors have no return type)
+const runtimeSchedulerPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h');
+if (fs.existsSync(runtimeSchedulerPath)) {
+  let content = fs.readFileSync(runtimeSchedulerPath, 'utf8');
+  if (content.includes('SWIFT_RETURNS_RETAINED RuntimeScheduler(')) {
+    content = content.replaceAll('SWIFT_RETURNS_RETAINED RuntimeScheduler(', 'RuntimeScheduler(');
+    fs.writeFileSync(runtimeSchedulerPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched RuntimeScheduler.h (removed invalid SWIFT_RETURNS_RETAINED on constructors)');
+  } else {
+    console.log('[patch-ios] RuntimeScheduler.h already patched or pattern not found');
+  }
+} else {
+  console.log('[patch-ios] RuntimeScheduler.h not found, skipping');
+}
+
 console.log('[patch-ios] Done patching.');
 
