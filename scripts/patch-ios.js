@@ -639,5 +639,35 @@ if (fs.existsSync(swiftUIHostingViewPath)) {
   }
 }
 
+// 13. Patch EventEmitter.swift in expo-modules-core
+// Wrap self in NonisolatedUnsafeWeakVar to avoid Swift 6 data-race errors when sending into JavaScriptActor closure
+const eventEmitterPath = path.resolve(__dirname, '../node_modules/expo-modules-core/ios/Core/Events/EventEmitter.swift');
+if (fs.existsSync(eventEmitterPath)) {
+  let content = fs.readFileSync(eventEmitterPath, 'utf8');
+  let changed = false;
+
+  if (content.includes('nonisolated(unsafe) weak let emitter = self')) {
+    content = content.replaceAll(
+      'nonisolated(unsafe) weak let emitter = self',
+      'let emitterBox = NonisolatedUnsafeWeakVar(self)'
+    );
+    content = content.replaceAll(
+      'guard let emitter else {',
+      'guard let emitter = emitterBox.value else {'
+    );
+    content = content.replaceAll(
+      'guard let emitter, let appContext else {',
+      'guard let emitter = emitterBox.value, let appContext else {'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(eventEmitterPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched EventEmitter.swift in expo-modules-core with NonisolatedUnsafeWeakVar');
+  }
+}
+
 console.log('[patch-ios] Done patching.');
+
 
