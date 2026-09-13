@@ -594,4 +594,50 @@ if (fs.existsSync(targetSupportDir)) {
   console.log('[patch-ios] Successfully patched all Pods Target Support Files .xcconfig files with C++20 and C++ interop flags');
 }
 
+// 12. Patch SwiftUIHostingView.swift in expo-modules-core
+const swiftUIHostingViewPath = path.resolve(__dirname, '../node_modules/expo-modules-core/ios/Core/Views/SwiftUI/SwiftUIHostingView.swift');
+if (fs.existsSync(swiftUIHostingViewPath)) {
+  let content = fs.readFileSync(swiftUIHostingViewPath, 'utf8');
+  let changed = false;
+
+  // Rename private let contentView to swiftUIContentView to avoid colliding with RCTViewComponentView.contentView
+  if (content.includes('private let contentView: any ExpoSwiftUI.View')) {
+    content = content.replace('private let contentView: any ExpoSwiftUI.View', 'private let swiftUIContentView: any ExpoSwiftUI.View');
+    changed = true;
+  }
+
+  // Concrete type instantiation and AnyView conformance
+  if (content.includes('self.contentView = ContentView(props: props)')) {
+    content = content.replace(
+      /self\.contentView = ContentView\(props: props\)\s*let rootView = AnyView\(contentView\)/,
+      'let concreteContentView = ContentView(props: props)\n      self.swiftUIContentView = concreteContentView\n      let rootView = AnyView(concreteContentView)'
+    );
+    changed = true;
+  }
+
+  // Resolve sizingOptions contextual type
+  if (content.includes('controller.sizingOptions = [.intrinsicContentSize]')) {
+    content = content.replace(
+      'controller.sizingOptions = [.intrinsicContentSize]',
+      'controller.sizingOptions = [UIHostingControllerSizingOptions.intrinsicContentSize]'
+    );
+    changed = true;
+  }
+
+  // Return swiftUIContentView in getContentView()
+  if (content.includes('return contentView')) {
+    content = content.replace(
+      /public func getContentView\(\) -> any ExpoSwiftUI\.View \{\s*return contentView\s*\}/,
+      'public func getContentView() -> any ExpoSwiftUI.View {\n      return swiftUIContentView\n    }'
+    );
+    changed = true;
+  }
+
+  if (changed) {
+    fs.writeFileSync(swiftUIHostingViewPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched SwiftUIHostingView.swift in expo-modules-core');
+  }
+}
+
 console.log('[patch-ios] Done patching.');
+
