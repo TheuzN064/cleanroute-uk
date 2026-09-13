@@ -34,10 +34,12 @@ if (fs.existsSync(podfilePath)) {
         config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
         config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
         
-        # Ensure ReactCodegen and parent headers can be resolved
+        # Ensure ReactCodegen, ExpoModulesJSI_Cxx, and jsi headers can be resolved
         hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
-        unless hsp.include?("$(inherited)")
-          config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{hsp}".strip
+        hsp = hsp.join(" ") if hsp.is_a?(Array)
+        extra_hsp = '"$(PODS_ROOT)/Headers/Public/ExpoModulesJSI_Cxx" "$(PODS_ROOT)/Headers/Public/jsi" "$(PODS_ROOT)/Headers/Public/React-jsi"'
+        unless hsp.include?("ExpoModulesJSI_Cxx")
+          config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{extra_hsp} #{hsp}".strip
         end
       end
     end
@@ -137,8 +139,39 @@ if (fs.existsSync(buildXcframeworkScriptPath)) {
     'cp "${generated_maps}/${PACKAGE_NAME}-Swift.h" "$headers_dir/"',
     'if [[ -f "${generated_maps}/${PACKAGE_NAME}-Swift.h" ]]; then cp "${generated_maps}/${PACKAGE_NAME}-Swift.h" "$headers_dir/"; else find "${DERIVED_DATA_PATH}" -name "${PACKAGE_NAME}-Swift.h" -exec cp {} "$headers_dir/" \\; -quit || true; fi'
   );
+
+  const customModulemap = `{
+    echo "module \${PACKAGE_NAME} {"
+    echo "  header \\"\${PACKAGE_NAME}-Swift.h\\""
+    echo "  export *"
+    echo ""
+    echo "  explicit module Cxx {"
+    echo "    requires cplusplus"
+    if (( \${#public_cxx_headers[@]} )); then
+      for header in "\${public_cxx_headers[@]}"; do
+        echo "    header \\"\${header}\\""
+      done
+    fi
+    echo "    export *"
+    echo "  }"
+    echo "}"
+    echo ""
+    echo "module ExpoModulesJSI_Cxx {"
+    echo "  export *"
+    echo "}"
+    echo ""
+    echo "module jsi {"
+    echo "  export *"
+    echo "}"
+  } > "\${headers_dir}/module.modulemap"`;
+
+  const modulemapRegex = /\{\s*echo "module \$\{PACKAGE_NAME\} \{"[\s\S]*?\} > "\$\{headers_dir\}\/module\.modulemap"/m;
+  if (modulemapRegex.test(script)) {
+    script = script.replace(modulemapRegex, customModulemap);
+  }
+
   fs.writeFileSync(buildXcframeworkScriptPath, script, 'utf8');
-  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh (BUILD_LIBRARY_FOR_DISTRIBUTION=NO and resilient header copy)');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh (BUILD_LIBRARY_FOR_DISTRIBUTION=NO, multi-module modulemap, and resilient header copy)');
 }
 
 // 5. Patch expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h
@@ -233,6 +266,21 @@ if (fs.existsSync(expoModulesCorePodspecPath)) {
   }
 } else {
   console.log('[patch-ios] ExpoModulesCore.podspec not found, skipping');
+}
+
+// 9. Ensure ExpoModulesJSI_Cxx and jsi Clang module maps exist in Pods/Headers/Public
+const publicHeadersDir = path.resolve(__dirname, '../ios/Pods/Headers/Public');
+if (fs.existsSync(publicHeadersDir)) {
+  const cxxDir = path.join(publicHeadersDir, 'ExpoModulesJSI_Cxx');
+  fs.mkdirSync(cxxDir, { recursive: true });
+  fs.writeFileSync(path.join(cxxDir, 'module.modulemap'), 'module ExpoModulesJSI_Cxx {\n  export *\n}\n', 'utf8');
+
+  const jsiDir = path.join(publicHeadersDir, 'jsi');
+  fs.mkdirSync(jsiDir, { recursive: true });
+  fs.writeFileSync(path.join(jsiDir, 'module.modulemap'), 'module jsi {\n  export *\n}\n', 'utf8');
+  console.log('[patch-ios] Successfully created fallback module maps for ExpoModulesJSI_Cxx and jsi in Pods/Headers/Public');
+} else {
+  console.log('[patch-ios] ios/Pods/Headers/Public does not exist yet (prebuild not run yet or run later)');
 }
 
 console.log('[patch-ios] Done patching.');

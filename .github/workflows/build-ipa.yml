@@ -61,6 +61,10 @@ jobs:
           # 4. Install CocoaPods
           cd ios
           pod install
+          cd ..
+
+          # 5. Create Clang module maps for ExpoModulesJSI_Cxx and jsi
+          node scripts/patch-ios.js
 
       - name: 7. Pre-build ExpoModulesJSI XCFramework
         run: |
