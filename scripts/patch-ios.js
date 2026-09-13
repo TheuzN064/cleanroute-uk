@@ -33,6 +33,14 @@ if (fs.existsSync(podfilePath)) {
         config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
         config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
         config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
+        config.build_settings["SWIFT_CXX_INTEROPERABILITY_MODE"] = "default"
+        
+        # Ensure C++ interop flag is in OTHER_SWIFT_FLAGS
+        osf = config.build_settings["OTHER_SWIFT_FLAGS"] || "$(inherited)"
+        osf = osf.join(" ") if osf.is_a?(Array)
+        unless osf.include?("-cxx-interoperability-mode")
+          config.build_settings["OTHER_SWIFT_FLAGS"] = "#{osf} -cxx-interoperability-mode=default".strip
+        end
         
         # Ensure ReactCodegen, ExpoModulesJSI_Cxx, and jsi headers can be resolved
         hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
@@ -49,6 +57,7 @@ if (fs.existsSync(podfilePath)) {
         target.build_configurations.each do |config|
           config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
           config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
+          config.build_settings["SWIFT_CXX_INTEROPERABILITY_MODE"] = "default"
           config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"
           config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"
         end
@@ -250,7 +259,7 @@ if (fs.existsSync(precompiledModulesRbPath)) {
   console.log('[patch-ios] precompiled_modules.rb not found, skipping');
 }
 
-// 8. Patch ExpoModulesCore.podspec to always build from source
+// 8. Patch ExpoModulesCore.podspec to always build from source with C++ interop
 const expoModulesCorePodspecPath = path.resolve(__dirname, '../node_modules/expo-modules-core/ExpoModulesCore.podspec');
 if (fs.existsSync(expoModulesCorePodspecPath)) {
   let content = fs.readFileSync(expoModulesCorePodspecPath, 'utf8');
@@ -259,11 +268,19 @@ if (fs.existsSync(expoModulesCorePodspecPath)) {
       'if (!Expo::PackagesConfig.instance.try_link_with_prebuilt_xcframework(s))',
       'if (true || !Expo::PackagesConfig.instance.try_link_with_prebuilt_xcframework(s))'
     );
-    fs.writeFileSync(expoModulesCorePodspecPath, content, 'utf8');
-    console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build');
-  } else {
-    console.log('[patch-ios] ExpoModulesCore.podspec already patched or pattern not found');
   }
+  if (!content.includes("'SWIFT_CXX_INTEROPERABILITY_MODE' => 'default'")) {
+    content = content.replace(
+      "'SWIFT_COMPILATION_MODE' => 'wholemodule',",
+      "'SWIFT_COMPILATION_MODE' => 'wholemodule',\n    'SWIFT_CXX_INTEROPERABILITY_MODE' => 'default',"
+    );
+    content = content.replace(
+      "'OTHER_SWIFT_FLAGS' => \"$(inherited) ",
+      "'OTHER_SWIFT_FLAGS' => \"$(inherited) -cxx-interoperability-mode=default "
+    );
+  }
+  fs.writeFileSync(expoModulesCorePodspecPath, content, 'utf8');
+  console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build with C++ interop');
 } else {
   console.log('[patch-ios] ExpoModulesCore.podspec not found, skipping');
 }
