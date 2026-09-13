@@ -196,5 +196,44 @@ if (fs.existsSync(jsRuntimePath)) {
   console.log('[patch-ios] JavaScriptRuntime.swift not found, skipping');
 }
 
+// 7. Patch expo-modules-autolinking to disable precompiled modules
+// Precompiled Expo modules shipped in npm were built with Swift 6.3.1, causing
+// fatal compiler mismatch errors on Xcode 16 (Swift 6.2.4).
+// Forcing enabled? to false ensures all Expo modules build cleanly from source with Xcode 16.
+const precompiledModulesRbPath = path.resolve(__dirname, '../node_modules/expo-modules-autolinking/scripts/ios/precompiled_modules.rb');
+if (fs.existsSync(precompiledModulesRbPath)) {
+  let content = fs.readFileSync(precompiledModulesRbPath, 'utf8');
+  if (!content.includes('def enabled?\n        false\n      end')) {
+    content = content.replace(
+      /def enabled\?[\s\S]*?end\s*\n\s*def configure/m,
+      "def enabled?\n        false\n      end\n\n      def configure"
+    );
+    fs.writeFileSync(precompiledModulesRbPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched precompiled_modules.rb to disable incompatible precompiled modules');
+  } else {
+    console.log('[patch-ios] precompiled_modules.rb already patched');
+  }
+} else {
+  console.log('[patch-ios] precompiled_modules.rb not found, skipping');
+}
+
+// 8. Patch ExpoModulesCore.podspec to always build from source
+const expoModulesCorePodspecPath = path.resolve(__dirname, '../node_modules/expo-modules-core/ExpoModulesCore.podspec');
+if (fs.existsSync(expoModulesCorePodspecPath)) {
+  let content = fs.readFileSync(expoModulesCorePodspecPath, 'utf8');
+  if (content.includes('if (!Expo::PackagesConfig.instance.try_link_with_prebuilt_xcframework(s))')) {
+    content = content.replace(
+      'if (!Expo::PackagesConfig.instance.try_link_with_prebuilt_xcframework(s))',
+      'if (true || !Expo::PackagesConfig.instance.try_link_with_prebuilt_xcframework(s))'
+    );
+    fs.writeFileSync(expoModulesCorePodspecPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build');
+  } else {
+    console.log('[patch-ios] ExpoModulesCore.podspec already patched or pattern not found');
+  }
+} else {
+  console.log('[patch-ios] ExpoModulesCore.podspec not found, skipping');
+}
+
 console.log('[patch-ios] Done patching.');
 
