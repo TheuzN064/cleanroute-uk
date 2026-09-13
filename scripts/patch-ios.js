@@ -31,6 +31,7 @@ if (fs.existsSync(podfilePath)) {
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
+        config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
         config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
         
         # Ensure ReactCodegen and parent headers can be resolved
@@ -45,6 +46,7 @@ if (fs.existsSync(podfilePath)) {
       aggregate_target.user_project.targets.each do |target|
         target.build_configurations.each do |config|
           config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
+          config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
           config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"
           config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"
         end
@@ -108,16 +110,27 @@ if (fs.existsSync(buildXcframeworkScriptPath)) {
     'local env_args=(PATH="$PATH" HOME="$HOME" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")',
     'local env_args=(PATH="$PATH" HOME="$HOME" USER="${USER:-runner}" LOGNAME="${LOGNAME:-runner}" TMPDIR="${TMPDIR:-/tmp}" SHELL="${SHELL:-/bin/bash}" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")'
   );
-  // Remove -quiet, enable ad-hoc signing for macOS 15 Gatekeeper execution policy, and set SKIP_INSTALL=YES
-  script = script.replace('-quiet \\', '');
-  script = script.replace(
-    /CODE_SIGNING_ALLOWED=NO \\\s*CODE_SIGNING_REQUIRED=NO \\\s*CODE_SIGN_IDENTITY="" \\/g,
-    'CODE_SIGN_IDENTITY="-" \\\n    CODE_SIGNING_REQUIRED=NO \\\n    AD_HOC_CODE_SIGNING_ALLOWED=YES \\\n    CODE_SIGNING_ALLOWED=YES \\'
-  );
+
+  const xcbuildPatch = `REGISTER_EXECUTION_POLICY_EXCEPTION=NO \\
+    ENABLE_USER_SCRIPT_SANDBOXING=NO \\
+    CODE_SIGN_IDENTITY="-" \\
+    CODE_SIGNING_REQUIRED=NO \\
+    AD_HOC_CODE_SIGNING_ALLOWED=YES \\
+    CODE_SIGNING_ALLOWED=YES \\`;
+
+  if (script.includes('-quiet \\')) {
+    script = script.replace('-quiet \\', xcbuildPatch);
+  } else if (!script.includes('REGISTER_EXECUTION_POLICY_EXCEPTION=NO')) {
+    script = script.replace(
+      '-configuration "$CONFIGURATION" \\',
+      `-configuration "$CONFIGURATION" \\\n    ${xcbuildPatch}`
+    );
+  }
+
   script = script.replace('SKIP_INSTALL=NO \\', 'SKIP_INSTALL=YES \\');
   fs.writeFileSync(buildXcframeworkScriptPath, script, 'utf8');
   console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh for macOS 15 Gatekeeper');
 }
 
-
 console.log('[patch-ios] Done patching.');
+
