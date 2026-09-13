@@ -712,6 +712,32 @@ if (fs.existsSync(eventEmitterPath)) {
   }
 }
 
+// 14. Patch expo-file-system to resolve ambiguous EXFileSystemPermissionFlags type lookup
+function patchFileSystemFiles(dir) {
+  if (!fs.existsSync(dir)) return;
+  const entries = fs.readdirSync(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name !== '.git') {
+        patchFileSystemFiles(fullPath);
+      }
+    } else if (entry.name === 'FileSystemHelpers.swift' || entry.name === 'FileSystemLegacyModule.swift') {
+      let content = fs.readFileSync(fullPath, 'utf8');
+      if (!content.includes('typealias EXFileSystemPermissionFlags = ExpoModulesCore.EXFileSystemPermissionFlags')) {
+        content = content.replace(
+          'import ExpoModulesCore',
+          'import ExpoModulesCore\n\ntypealias EXFileSystemPermissionFlags = ExpoModulesCore.EXFileSystemPermissionFlags'
+        );
+        fs.writeFileSync(fullPath, content, 'utf8');
+        console.log(`[patch-ios] Successfully patched ${entry.name} with explicit EXFileSystemPermissionFlags typealias`);
+      }
+    }
+  }
+}
+const nodeModulesDir = path.resolve(__dirname, '../node_modules');
+patchFileSystemFiles(nodeModulesDir);
+
 console.log('[patch-ios] Done patching.');
 
 
