@@ -28,6 +28,8 @@ if (fs.existsSync(podfilePath)) {
   
   const customPostInstall = `
     # --- Custom CI Patch for Xcode 16 & Sideloadly ---
+    extra_hsp = '"$(PODS_ROOT)/Headers/Public/ExpoModulesJSI_Cxx" "$(PODS_ROOT)/Headers/Public/jsi" "$(PODS_ROOT)/Headers/Public/React-jsi" "$(PODS_ROOT)/Headers/Private/Yoga"'
+
     installer.pods_project.targets.each do |target|
       target.build_configurations.each do |config|
         config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
@@ -50,7 +52,6 @@ if (fs.existsSync(podfilePath)) {
         # Ensure ReactCodegen, ExpoModulesJSI_Cxx, jsi, and Private Yoga headers can be resolved
         hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
         hsp = hsp.join(" ") if hsp.is_a?(Array)
-        extra_hsp = '"$(PODS_ROOT)/Headers/Public/ExpoModulesJSI_Cxx" "$(PODS_ROOT)/Headers/Public/jsi" "$(PODS_ROOT)/Headers/Public/React-jsi" "$(PODS_ROOT)/Headers/Private/Yoga"'
         unless hsp.include?("Headers/Private/Yoga")
           config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{extra_hsp} #{hsp}".strip
         end
