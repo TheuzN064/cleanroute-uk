@@ -60,7 +60,7 @@ jobs:
           cd node_modules/expo-modules-jsi/apple
           export PODS_ROOT="$GITHUB_WORKSPACE/ios/Pods"
           export PLATFORM_NAME=iphoneos
-          ./scripts/build-xcframework.sh || echo "Pre-build step finished"
+          ./scripts/build-xcframework.sh
 
       - name: 8. Build and Package Unsigned IPA
         run: |

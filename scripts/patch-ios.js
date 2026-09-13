@@ -87,4 +87,26 @@ if (fs.existsSync(iosDir)) {
   }
 }
 
+// 4. Patch expo-modules-jsi for Xcode 16 / Swift 6.0 compatibility
+const packageSwiftPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/Package.swift');
+if (fs.existsSync(packageSwiftPath)) {
+  let packageSwift = fs.readFileSync(packageSwiftPath, 'utf8');
+  // Downgrade tools version to 6.0 for Xcode 16.2
+  packageSwift = packageSwift.replace('// swift-tools-version: 6.2', '// swift-tools-version: 6.0');
+  // Remove unsupported upcoming features that fail in Swift 6.0 (only in Swift 6.2+)
+  packageSwift = packageSwift.replace(/\.enableUpcomingFeature\("NonisolatedNonsendingByDefault"\),\s*/g, '');
+  packageSwift = packageSwift.replace(/\.enableUpcomingFeature\("InferIsolatedConformances"\),\s*/g, '');
+  fs.writeFileSync(packageSwiftPath, packageSwift, 'utf8');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi/apple/Package.swift for Swift 6.0');
+}
+
+const buildXcframeworkScriptPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh');
+if (fs.existsSync(buildXcframeworkScriptPath)) {
+  let script = fs.readFileSync(buildXcframeworkScriptPath, 'utf8');
+  // Remove -quiet so compilation errors are visible and add code signing disabled
+  script = script.replace('-quiet \\', 'CODE_SIGNING_ALLOWED=NO \\\n    CODE_SIGNING_REQUIRED=NO \\\n    CODE_SIGN_IDENTITY="" \\');
+  fs.writeFileSync(buildXcframeworkScriptPath, script, 'utf8');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh');
+}
+
 console.log('[patch-ios] Done patching.');
