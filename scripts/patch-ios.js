@@ -556,13 +556,6 @@ if (fs.existsSync(publicHeadersDir)) {
   fs.mkdirSync(jsiDir, { recursive: true });
   fs.writeFileSync(path.join(jsiDir, 'module.modulemap'), 'module jsi {\n  export *\n}\n', 'utf8');
 
-  const privateYogaDir = path.resolve(__dirname, '../ios/Pods/Headers/Private/Yoga');
-  const publicYogaDir = path.join(publicHeadersDir, 'Yoga');
-  if (fs.existsSync(privateYogaDir) && fs.existsSync(publicYogaDir)) {
-    fs.cpSync(privateYogaDir, publicYogaDir, { recursive: true, force: true });
-    console.log('[patch-ios] Copied Private Yoga headers to Public Yoga headers');
-  }
-
   console.log('[patch-ios] Successfully created fallback module maps for ExpoModulesJSI_Cxx and jsi in Pods/Headers/Public');
 } else {
   console.log('[patch-ios] ios/Pods/Headers/Public does not exist yet (prebuild not run yet or run later)');
