@@ -47,6 +47,9 @@ if (fs.existsSync(podfilePath)) {
         unless osf.include?("-std=c++20")
           osf = "#{osf} -Xcc -std=c++20"
         end
+        unless osf.include?("-clang-header-expose-decls")
+          osf = "#{osf} -Xfrontend -clang-header-expose-decls=has-expose-attr"
+        end
         config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
         
         # Ensure ReactCodegen, ExpoModulesJSI_Cxx, jsi, and Private Yoga headers can be resolved
@@ -54,6 +57,30 @@ if (fs.existsSync(podfilePath)) {
         hsp = hsp.join(" ") if hsp.is_a?(Array)
         unless hsp.include?("Headers/Private/Yoga")
           config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{extra_hsp} #{hsp}".strip
+        end
+      end
+
+      # Hook into ExpoModulesCore compatibility header copy phase to sanitize any residual C++ issues
+      if target.name == "ExpoModulesCore"
+        target.shell_script_build_phases.each do |phase|
+          if phase.name && phase.name.include?("compatibility header") && !phase.shell_script.include?("Sanitize C++")
+            phase.shell_script += <<-EOS
+
+# Sanitize C++ declarations in generated ExpoModulesCore-Swift.h
+find "\${DERIVED_FILE_DIR:-\${DERIVED_SOURCES_DIR}}" "\${BUILT_PRODUCTS_DIR}" -name "ExpoModulesCore-Swift.h" 2>/dev/null | while read -r hdr; do
+  if [ -f "$hdr" ]; then
+    echo "[patch-ios] Sanitizing $hdr..."
+    sed -i '' 's/class SWIFT_SYMBOL("s:15ExpoModulesCore17GenericTypedArrayC") GenericTypedArray : public TypedArray/class GenericTypedArray/g' "$hdr" || true
+    sed -i '' 's/: public GenericTypedArray//g' "$hdr" || true
+    sed -i '' 's/using GenericTypedArray::GenericTypedArray;//g' "$hdr" || true
+    sed -i '' 's/using JavaScriptRuntime::JavaScriptRuntime;//g' "$hdr" || true
+    sed -i '' 's/using JavaScriptRuntime::operator=;//g' "$hdr" || true
+    sed -i '' 's/: JavaScriptRuntime(ptr)//g' "$hdr" || true
+    sed -i '' 's/class ExpoRuntime : public ExpoModulesJSI::JavaScriptRuntime/class ExpoRuntime/g' "$hdr" || true
+  fi
+done
+EOS
+          end
         end
       end
     end
@@ -75,6 +102,9 @@ if (fs.existsSync(podfilePath)) {
           end
           unless osf.include?("-std=c++20")
             osf = "#{osf} -Xcc -std=c++20"
+          end
+          unless osf.include?("-clang-header-expose-decls")
+            osf = "#{osf} -Xfrontend -clang-header-expose-decls=has-expose-attr"
           end
           config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
 
@@ -307,10 +337,10 @@ if (fs.existsSync(expoModulesCorePodspecPath)) {
       "'DEFINES_MODULE' => 'YES',\n    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',"
     );
   }
-  // Ensure OTHER_SWIFT_FLAGS includes both -cxx-interoperability-mode=default and -Xcc -std=c++20
+  // Ensure OTHER_SWIFT_FLAGS includes -cxx-interoperability-mode=default, -Xfrontend -clang-header-expose-decls=has-expose-attr, and -Xcc -std=c++20
   content = content.replace(
     /'OTHER_SWIFT_FLAGS'\s*=>\s*"\$\(inherited\)[^"]*"/,
-    `'OTHER_SWIFT_FLAGS' => "$(inherited) -cxx-interoperability-mode=default -Xcc -std=c++20 #{new_arch_enabled ? new_arch_compiler_flags : ''}"`
+    `'OTHER_SWIFT_FLAGS' => "$(inherited) -cxx-interoperability-mode=default -Xfrontend -clang-header-expose-decls=has-expose-attr -Xcc -std=c++20 #{new_arch_enabled ? new_arch_compiler_flags : ''}"`
   );
   fs.writeFileSync(expoModulesCorePodspecPath, content, 'utf8');
   console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build with C++20 and C++ interop');
@@ -583,12 +613,12 @@ if (fs.existsSync(targetSupportDir)) {
           changed = true;
         }
         if (text.includes('OTHER_SWIFT_FLAGS =')) {
-          if (!text.includes('-cxx-interoperability-mode')) {
-            text = text.replace('OTHER_SWIFT_FLAGS =', 'OTHER_SWIFT_FLAGS = -cxx-interoperability-mode=default');
-            changed = true;
-          }
-          if (!text.includes('-std=c++20')) {
-            text = text.replace('OTHER_SWIFT_FLAGS =', 'OTHER_SWIFT_FLAGS = -Xcc -std=c++20');
+          let flagsToAdd = [];
+          if (!text.includes('-cxx-interoperability-mode')) flagsToAdd.push('-cxx-interoperability-mode=default');
+          if (!text.includes('-std=c++20')) flagsToAdd.push('-Xcc -std=c++20');
+          if (!text.includes('-clang-header-expose-decls')) flagsToAdd.push('-Xfrontend -clang-header-expose-decls=has-expose-attr');
+          if (flagsToAdd.length > 0) {
+            text = text.replaceAll('OTHER_SWIFT_FLAGS =', `OTHER_SWIFT_FLAGS = ${flagsToAdd.join(' ')}`);
             changed = true;
           }
         }
