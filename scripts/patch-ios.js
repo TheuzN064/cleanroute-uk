@@ -103,10 +103,21 @@ if (fs.existsSync(packageSwiftPath)) {
 const buildXcframeworkScriptPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh');
 if (fs.existsSync(buildXcframeworkScriptPath)) {
   let script = fs.readFileSync(buildXcframeworkScriptPath, 'utf8');
-  // Remove -quiet so compilation errors are visible and add code signing disabled
-  script = script.replace('-quiet \\', 'CODE_SIGNING_ALLOWED=NO \\\n    CODE_SIGNING_REQUIRED=NO \\\n    CODE_SIGN_IDENTITY="" \\');
+  // Forward essential macOS environment variables so syspolicyd doesn't fail on RegisterExecutionPolicyException
+  script = script.replace(
+    'local env_args=(PATH="$PATH" HOME="$HOME" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")',
+    'local env_args=(PATH="$PATH" HOME="$HOME" USER="${USER:-runner}" LOGNAME="${LOGNAME:-runner}" TMPDIR="${TMPDIR:-/tmp}" SHELL="${SHELL:-/bin/bash}" PODS_ROOT="$PODS_ROOT" RN_ROOT="$RN_ROOT")'
+  );
+  // Remove -quiet, enable ad-hoc signing for macOS 15 Gatekeeper execution policy, and set SKIP_INSTALL=YES
+  script = script.replace('-quiet \\', '');
+  script = script.replace(
+    /CODE_SIGNING_ALLOWED=NO \\\s*CODE_SIGNING_REQUIRED=NO \\\s*CODE_SIGN_IDENTITY="" \\/g,
+    'CODE_SIGN_IDENTITY="-" \\\n    CODE_SIGNING_REQUIRED=NO \\\n    AD_HOC_CODE_SIGNING_ALLOWED=YES \\\n    CODE_SIGNING_ALLOWED=YES \\'
+  );
+  script = script.replace('SKIP_INSTALL=NO \\', 'SKIP_INSTALL=YES \\');
   fs.writeFileSync(buildXcframeworkScriptPath, script, 'utf8');
-  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh for macOS 15 Gatekeeper');
 }
+
 
 console.log('[patch-ios] Done patching.');

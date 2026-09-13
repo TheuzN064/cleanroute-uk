@@ -36,6 +36,10 @@ jobs:
           sudo ln -sf "$NPX_PATH" /usr/local/bin/npx || true
           echo "NODE_BINARY=$NODE_PATH" >> $GITHUB_ENV
 
+          # Enable Developer Mode on macOS runner to allow RegisterExecutionPolicyException and Xcode internal tools
+          sudo DevToolsSecurity -enable || true
+          sudo security authorizationdb set system.privilege.taskport allow || true
+
       - name: 5. Install Node Dependencies
         run: npm install --legacy-peer-deps
 
