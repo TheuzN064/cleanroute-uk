@@ -1,0 +1,56 @@
+name: Build Unsigned iOS IPA for Sideloadly
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+      - master
+
+jobs:
+  build-ipa:
+    runs-on: macos-14
+    steps:
+      - name: 1. Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: 2. Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: 'npm'
+
+      - name: 3. Install Node Dependencies
+        run: npm ci || npm install
+
+      - name: 4. Generate Native iOS Project with Expo
+        run: npx expo prebuild --platform ios --clean
+
+      - name: 5. Build and Package Unsigned IPA
+        run: |
+          cd ios
+          WORKSPACE=$(ls -d *.xcworkspace | head -n 1)
+          SCHEME=$(echo "$WORKSPACE" | sed 's/.xcworkspace//')
+          echo "Building Workspace: $WORKSPACE with Scheme: $SCHEME"
+
+          xcodebuild archive \
+            -workspace "$WORKSPACE" \
+            -scheme "$SCHEME" \
+            -configuration Release \
+            -destination 'generic/platform=iOS' \
+            -archivePath build/App.xcarchive \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY=""
+
+          mkdir -p Payload
+          cp -r build/App.xcarchive/Products/Applications/*.app Payload/
+          zip -r CleanRouteUK.ipa Payload
+          echo "IPA created successfully at ios/CleanRouteUK.ipa"
+
+      - name: 6. Upload IPA Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: CleanRouteUK.ipa
+          path: ios/CleanRouteUK.ipa
+          retention-days: 14
