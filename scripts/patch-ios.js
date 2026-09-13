@@ -47,11 +47,11 @@ if (fs.existsSync(podfilePath)) {
         end
         config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
         
-        # Ensure ReactCodegen, ExpoModulesJSI_Cxx, and jsi headers can be resolved
+        # Ensure ReactCodegen, ExpoModulesJSI_Cxx, jsi, and Private Yoga headers can be resolved
         hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
         hsp = hsp.join(" ") if hsp.is_a?(Array)
-        extra_hsp = '"$(PODS_ROOT)/Headers/Public/ExpoModulesJSI_Cxx" "$(PODS_ROOT)/Headers/Public/jsi" "$(PODS_ROOT)/Headers/Public/React-jsi"'
-        unless hsp.include?("ExpoModulesJSI_Cxx")
+        extra_hsp = '"$(PODS_ROOT)/Headers/Public/ExpoModulesJSI_Cxx" "$(PODS_ROOT)/Headers/Public/jsi" "$(PODS_ROOT)/Headers/Public/React-jsi" "$(PODS_ROOT)/Headers/Private/Yoga"'
+        unless hsp.include?("Headers/Private/Yoga")
           config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{extra_hsp} #{hsp}".strip
         end
       end
@@ -76,6 +76,12 @@ if (fs.existsSync(podfilePath)) {
             osf = "#{osf} -Xcc -std=c++20"
           end
           config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
+
+          hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
+          hsp = hsp.join(" ") if hsp.is_a?(Array)
+          unless hsp.include?("Headers/Private/Yoga")
+            config.build_settings["HEADER_SEARCH_PATHS"] = "$(inherited) #{extra_hsp} #{hsp}".strip
+          end
         end
       end
       aggregate_target.user_project.save
@@ -538,7 +544,7 @@ constexpr bool RawPropsFilterable = is_raw_props_filterable<T>::value;
   }
 }
 
-// 10. Ensure ExpoModulesJSI_Cxx and jsi Clang module maps exist in Pods/Headers/Public
+// 10. Ensure ExpoModulesJSI_Cxx and jsi Clang module maps exist in Pods/Headers/Public, and mirror Private Yoga headers
 const publicHeadersDir = path.resolve(__dirname, '../ios/Pods/Headers/Public');
 if (fs.existsSync(publicHeadersDir)) {
   const cxxDir = path.join(publicHeadersDir, 'ExpoModulesJSI_Cxx');
@@ -548,6 +554,14 @@ if (fs.existsSync(publicHeadersDir)) {
   const jsiDir = path.join(publicHeadersDir, 'jsi');
   fs.mkdirSync(jsiDir, { recursive: true });
   fs.writeFileSync(path.join(jsiDir, 'module.modulemap'), 'module jsi {\n  export *\n}\n', 'utf8');
+
+  const privateYogaDir = path.resolve(__dirname, '../ios/Pods/Headers/Private/Yoga');
+  const publicYogaDir = path.join(publicHeadersDir, 'Yoga');
+  if (fs.existsSync(privateYogaDir) && fs.existsSync(publicYogaDir)) {
+    fs.cpSync(privateYogaDir, publicYogaDir, { recursive: true, force: true });
+    console.log('[patch-ios] Copied Private Yoga headers to Public Yoga headers');
+  }
+
   console.log('[patch-ios] Successfully created fallback module maps for ExpoModulesJSI_Cxx and jsi in Pods/Headers/Public');
 } else {
   console.log('[patch-ios] ios/Pods/Headers/Public does not exist yet (prebuild not run yet or run later)');
@@ -584,6 +598,12 @@ if (fs.existsSync(targetSupportDir)) {
             changed = true;
           }
         }
+        if (text.includes('HEADER_SEARCH_PATHS =')) {
+          if (!text.includes('Headers/Private/Yoga')) {
+            text = text.replace('HEADER_SEARCH_PATHS =', 'HEADER_SEARCH_PATHS = "$(PODS_ROOT)/Headers/Private/Yoga" ');
+            changed = true;
+          }
+        }
         if (changed) {
           fs.writeFileSync(fullPath, text, 'utf8');
         }
@@ -591,7 +611,7 @@ if (fs.existsSync(targetSupportDir)) {
     }
   }
   patchXcconfigFiles(targetSupportDir);
-  console.log('[patch-ios] Successfully patched all Pods Target Support Files .xcconfig files with C++20 and C++ interop flags');
+  console.log('[patch-ios] Successfully patched all Pods Target Support Files .xcconfig files with C++20, C++ interop flags, and Yoga search paths');
 }
 
 // 12. Patch SwiftUIHostingView.swift in expo-modules-core
