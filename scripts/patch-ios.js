@@ -98,8 +98,12 @@ if (fs.existsSync(packageSwiftPath)) {
   // Remove unsupported upcoming features that fail in Swift 6.0 (only in Swift 6.2+)
   packageSwift = packageSwift.replace(/\.enableUpcomingFeature\("NonisolatedNonsendingByDefault"\),\s*/g, '');
   packageSwift = packageSwift.replace(/\.enableUpcomingFeature\("InferIsolatedConformances"\),\s*/g, '');
+  // Remove module interface flags that cause EmitSwiftModule and SwiftEmitModule failures on Swift 6 with C++ interop
+  packageSwift = packageSwift.replace(/\s*"-enable-library-evolution",/g, '');
+  packageSwift = packageSwift.replace(/\s*"-emit-module-interface",/g, '');
+  packageSwift = packageSwift.replace(/\s*"-no-verify-emitted-module-interface",/g, '');
   fs.writeFileSync(packageSwiftPath, packageSwift, 'utf8');
-  console.log('[patch-ios] Successfully patched expo-modules-jsi/apple/Package.swift for Swift 6.0');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi/apple/Package.swift for Swift 6.0 (disabled module interface generation)');
 }
 
 const buildXcframeworkScriptPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/scripts/build-xcframework.sh');
@@ -127,9 +131,14 @@ if (fs.existsSync(buildXcframeworkScriptPath)) {
     );
   }
 
+  script = script.replace('BUILD_LIBRARY_FOR_DISTRIBUTION=YES \\', 'BUILD_LIBRARY_FOR_DISTRIBUTION=NO \\');
   script = script.replace('SKIP_INSTALL=NO \\', 'SKIP_INSTALL=YES \\');
+  script = script.replace(
+    'cp "${generated_maps}/${PACKAGE_NAME}-Swift.h" "$headers_dir/"',
+    'if [[ -f "${generated_maps}/${PACKAGE_NAME}-Swift.h" ]]; then cp "${generated_maps}/${PACKAGE_NAME}-Swift.h" "$headers_dir/"; else find "${DERIVED_DATA_PATH}" -name "${PACKAGE_NAME}-Swift.h" -exec cp {} "$headers_dir/" \\; -quit || true; fi'
+  );
   fs.writeFileSync(buildXcframeworkScriptPath, script, 'utf8');
-  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh for macOS 15 Gatekeeper');
+  console.log('[patch-ios] Successfully patched expo-modules-jsi build-xcframework.sh (BUILD_LIBRARY_FOR_DISTRIBUTION=NO and resilient header copy)');
 }
 
 console.log('[patch-ios] Done patching.');
