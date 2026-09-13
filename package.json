@@ -29,7 +29,8 @@
     "web": "expo start --web",
     "test": "tsx --test src/__tests__/businessLogic.test.ts",
     "build:ios": "cross-env EAS_NO_VCS=1 eas build -p ios --profile preview",
-    "eas:login": "cross-env EAS_NO_VCS=1 eas login"
+    "eas:login": "cross-env EAS_NO_VCS=1 eas login",
+    "push": "git push -u origin main"
   },
   "private": true
 }
