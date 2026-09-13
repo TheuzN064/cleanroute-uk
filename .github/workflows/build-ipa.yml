@@ -98,10 +98,10 @@ jobs:
             }
 
           # Verify and locate the built .app bundle
-          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" -maxdepth 1 | head -n 1)
+          APP_PATH=$(find build/Build/Products/Release-iphoneos -name "*.app" | head -n 1)
           if [ -z "$APP_PATH" ]; then
             echo "Error: Could not locate built .app bundle in build/Build/Products/Release-iphoneos"
-            ls -la build/Build/Products/Release-iphoneos || true
+            find build -name "*.app" || true
             exit 1
           fi
           echo "Found compiled app bundle: $APP_PATH"

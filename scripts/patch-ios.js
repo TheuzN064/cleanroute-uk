@@ -157,5 +157,44 @@ if (fs.existsSync(runtimeSchedulerPath)) {
   console.log('[patch-ios] RuntimeScheduler.h not found, skipping');
 }
 
+// 6. Patch expo-modules-jsi/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift
+// In Swift 6.0, capturing non-Sendable raw pointers into JavaScriptActor.assumeIsolated triggers
+// "error: sending 'resultPtr' risks causing data races". Use NonisolatedUnsafeVar box instead.
+const jsRuntimePath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI/Runtime/JavaScriptRuntime.swift');
+if (fs.existsSync(jsRuntimePath)) {
+  let jsRuntime = fs.readFileSync(jsRuntimePath, 'utf8').replace(/\r\n/g, '\n');
+
+  // Patch getter (lines 188-193)
+  if (jsRuntime.includes('nonisolated(unsafe) let resultPtr = resultPtr')) {
+    jsRuntime = jsRuntime.replace(
+      'nonisolated(unsafe) let resultPtr = resultPtr\n\n      return withGuaranteedContext(context) { (context: HostObjectContext, runtime) in\n        return JavaScriptActor.assumeIsolated {\n          return forwardingSwiftErrorsToJS(runtime: runtime) {\n            try context.get(propertyName).writeJSIValue(to: resultPtr)\n          }\n        }\n      }',
+      'let resultPtrBox = NonisolatedUnsafeVar(resultPtr)\n\n      return withGuaranteedContext(context) { (context: HostObjectContext, runtime) in\n        return JavaScriptActor.assumeIsolated {\n          return forwardingSwiftErrorsToJS(runtime: runtime) {\n            try context.get(propertyName).writeJSIValue(to: resultPtrBox.value)\n          }\n        }\n      }'
+    );
+    console.log('[patch-ios] Successfully patched JavaScriptRuntime.swift getter with NonisolatedUnsafeVar');
+  }
+
+  // Patch createFunctionClosure (owning this, lines 777-792)
+  if (jsRuntime.includes('let this = UnsafeMutablePointer(mutating: thisPtr).move()')) {
+    jsRuntime = jsRuntime.replace(
+      '    nonisolated(unsafe) let thisPtr = thisPtr\n    nonisolated(unsafe) let argumentsPtr = argumentsPtr\n    nonisolated(unsafe) let resultPtr = resultPtr\n\n    // See `withGuaranteedContext` for why neither the context nor the runtime is retained here, and\n    // why the result is written to the caller\'s slot instead of being returned.\n    return withGuaranteedContext(context) { (context: HostFunctionContext, runtime) in\n      return JavaScriptActor.assumeIsolated {\n        return forwardingSwiftErrorsToJS(runtime: runtime) {\n          let this = UnsafeMutablePointer(mutating: thisPtr).move()\n          let arguments = JavaScriptValuesBuffer(runtime, start: argumentsPtr, count: argumentsCount)\n          let thisValue = JavaScriptValue(runtime, this)\n          try context.call(thisValue, consume arguments).writeJSIValue(to: resultPtr)\n        }\n      }\n    }',
+      '    let thisPtrBox = NonisolatedUnsafeVar(thisPtr)\n    let argumentsPtrBox = NonisolatedUnsafeVar(argumentsPtr)\n    let resultPtrBox = NonisolatedUnsafeVar(resultPtr)\n\n    // See `withGuaranteedContext` for why neither the context nor the runtime is retained here, and\n    // why the result is written to the caller\'s slot instead of being returned.\n    return withGuaranteedContext(context) { (context: HostFunctionContext, runtime) in\n      return JavaScriptActor.assumeIsolated {\n        return forwardingSwiftErrorsToJS(runtime: runtime) {\n          let this = UnsafeMutablePointer(mutating: thisPtrBox.value).move()\n          let arguments = JavaScriptValuesBuffer(runtime, start: argumentsPtrBox.value, count: argumentsCount)\n          let thisValue = JavaScriptValue(runtime, this)\n          try context.call(thisValue, consume arguments).writeJSIValue(to: resultPtrBox.value)\n        }\n      }\n    }'
+    );
+    console.log('[patch-ios] Successfully patched JavaScriptRuntime.swift createFunctionClosure (owning this) with NonisolatedUnsafeVar');
+  }
+
+  // Patch createFunctionClosure (unowned this, lines 820-835)
+  if (jsRuntime.includes('let thisValue = JavaScriptUnownedValue(runtime.pointee, thisPtr)')) {
+    jsRuntime = jsRuntime.replace(
+      '    nonisolated(unsafe) let thisPtr = thisPtr\n    nonisolated(unsafe) let argumentsPtr = argumentsPtr\n    nonisolated(unsafe) let resultPtr = resultPtr\n\n    // See `withGuaranteedContext` for why neither the context nor the runtime is retained here, and\n    // why the result is written to the caller\'s slot instead of being returned.\n    return withGuaranteedContext(context) { (context: UnownedThisHostFunctionContext, runtime) in\n      return JavaScriptActor.assumeIsolated {\n        return forwardingSwiftErrorsToJS(runtime: runtime) {\n          let arguments = JavaScriptValuesBuffer(runtime, start: argumentsPtr, count: argumentsCount)\n          let thisValue = JavaScriptUnownedValue(runtime.pointee, thisPtr)\n          try context.call(thisValue, consume arguments).writeJSIValue(to: resultPtr)\n        }\n      }\n    }',
+      '    let thisPtrBox = NonisolatedUnsafeVar(thisPtr)\n    let argumentsPtrBox = NonisolatedUnsafeVar(argumentsPtr)\n    let resultPtrBox = NonisolatedUnsafeVar(resultPtr)\n\n    // See `withGuaranteedContext` for why neither the context nor the runtime is retained here, and\n    // why the result is written to the caller\'s slot instead of being returned.\n    return withGuaranteedContext(context) { (context: UnownedThisHostFunctionContext, runtime) in\n      return JavaScriptActor.assumeIsolated {\n        return forwardingSwiftErrorsToJS(runtime: runtime) {\n          let arguments = JavaScriptValuesBuffer(runtime, start: argumentsPtrBox.value, count: argumentsCount)\n          let thisValue = JavaScriptUnownedValue(runtime.pointee, thisPtrBox.value)\n          try context.call(thisValue, consume arguments).writeJSIValue(to: resultPtrBox.value)\n        }\n      }\n    }'
+    );
+    console.log('[patch-ios] Successfully patched JavaScriptRuntime.swift createFunctionClosure (unowned this) with NonisolatedUnsafeVar');
+  }
+
+  fs.writeFileSync(jsRuntimePath, jsRuntime, 'utf8');
+} else {
+  console.log('[patch-ios] JavaScriptRuntime.swift not found, skipping');
+}
+
 console.log('[patch-ios] Done patching.');
 
