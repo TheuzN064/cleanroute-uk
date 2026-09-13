@@ -34,13 +34,18 @@ if (fs.existsSync(podfilePath)) {
         config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
         config.build_settings["CLANG_ALLOW_NON_MODULAR_INCLUDES_IN_FRAMEWORK_MODULES"] = "YES"
         config.build_settings["SWIFT_CXX_INTEROPERABILITY_MODE"] = "default"
+        config.build_settings["CLANG_CXX_LANGUAGE_STANDARD"] = "c++20"
         
-        # Ensure C++ interop flag is in OTHER_SWIFT_FLAGS
+        # Ensure C++ interop and C++20 flags are in OTHER_SWIFT_FLAGS
         osf = config.build_settings["OTHER_SWIFT_FLAGS"] || "$(inherited)"
         osf = osf.join(" ") if osf.is_a?(Array)
         unless osf.include?("-cxx-interoperability-mode")
-          config.build_settings["OTHER_SWIFT_FLAGS"] = "#{osf} -cxx-interoperability-mode=default".strip
+          osf = "#{osf} -cxx-interoperability-mode=default"
         end
+        unless osf.include?("-std=c++20")
+          osf = "#{osf} -Xcc -std=c++20"
+        end
+        config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
         
         # Ensure ReactCodegen, ExpoModulesJSI_Cxx, and jsi headers can be resolved
         hsp = config.build_settings["HEADER_SEARCH_PATHS"] || ""
@@ -51,6 +56,7 @@ if (fs.existsSync(podfilePath)) {
         end
       end
     end
+    installer.pods_project.save
 
     installer.aggregate_targets.each do |aggregate_target|
       aggregate_target.user_project.targets.each do |target|
@@ -58,8 +64,18 @@ if (fs.existsSync(podfilePath)) {
           config.build_settings["ENABLE_USER_SCRIPT_SANDBOXING"] = "NO"
           config.build_settings["REGISTER_EXECUTION_POLICY_EXCEPTION"] = "NO"
           config.build_settings["SWIFT_CXX_INTEROPERABILITY_MODE"] = "default"
+          config.build_settings["CLANG_CXX_LANGUAGE_STANDARD"] = "c++20"
           config.build_settings["CODE_SIGNING_ALLOWED"] = "NO"
           config.build_settings["CODE_SIGNING_REQUIRED"] = "NO"
+          osf = config.build_settings["OTHER_SWIFT_FLAGS"] || "$(inherited)"
+          osf = osf.join(" ") if osf.is_a?(Array)
+          unless osf.include?("-cxx-interoperability-mode")
+            osf = "#{osf} -cxx-interoperability-mode=default"
+          end
+          unless osf.include?("-std=c++20")
+            osf = "#{osf} -Xcc -std=c++20"
+          end
+          config.build_settings["OTHER_SWIFT_FLAGS"] = osf.strip
         end
       end
       aggregate_target.user_project.save
@@ -68,7 +84,10 @@ if (fs.existsSync(podfilePath)) {
   `;
 
   if (podfile.includes('# --- Custom CI Patch')) {
-    console.log('[patch-ios] ios/Podfile already contains custom CI patch');
+    // Replace existing block to stay fresh
+    podfile = podfile.replace(/# --- Custom CI Patch[\s\S]*?# --- End Custom CI Patch ---/m, customPostInstall.trim());
+    fs.writeFileSync(podfilePath, podfile, 'utf8');
+    console.log('[patch-ios] Successfully refreshed custom CI patch in ios/Podfile');
   } else if (/post_install\s+do\s+\|installer\|/.test(podfile)) {
     podfile = podfile.replace(/(post_install\s+do\s+\|installer\|)/, `$1\n${customPostInstall}`);
     fs.writeFileSync(podfilePath, podfile, 'utf8');
@@ -188,8 +207,8 @@ if (fs.existsSync(buildXcframeworkScriptPath)) {
 const runtimeSchedulerPath = path.resolve(__dirname, '../node_modules/expo-modules-jsi/apple/Sources/ExpoModulesJSI-Cxx/include/RuntimeScheduler.h');
 if (fs.existsSync(runtimeSchedulerPath)) {
   let content = fs.readFileSync(runtimeSchedulerPath, 'utf8');
-  if (content.includes('SWIFT_RETURNS_RETAINED RuntimeScheduler(')) {
-    content = content.replaceAll('SWIFT_RETURNS_RETAINED RuntimeScheduler(', 'RuntimeScheduler(');
+  if (/SWIFT_RETURNS_(?:UN)?RETAINED\s+RuntimeScheduler\s*\(/.test(content)) {
+    content = content.replace(/SWIFT_RETURNS_(?:UN)?RETAINED\s+RuntimeScheduler\s*\(/g, 'RuntimeScheduler(');
     fs.writeFileSync(runtimeSchedulerPath, content, 'utf8');
     console.log('[patch-ios] Successfully patched RuntimeScheduler.h (removed invalid SWIFT_RETURNS_RETAINED on constructors)');
   } else {
@@ -259,7 +278,7 @@ if (fs.existsSync(precompiledModulesRbPath)) {
   console.log('[patch-ios] precompiled_modules.rb not found, skipping');
 }
 
-// 8. Patch ExpoModulesCore.podspec to always build from source with C++ interop
+// 8. Patch ExpoModulesCore.podspec to always build from source with C++20 and C++ interop
 const expoModulesCorePodspecPath = path.resolve(__dirname, '../node_modules/expo-modules-core/ExpoModulesCore.podspec');
 if (fs.existsSync(expoModulesCorePodspecPath)) {
   let content = fs.readFileSync(expoModulesCorePodspecPath, 'utf8');
@@ -274,18 +293,240 @@ if (fs.existsSync(expoModulesCorePodspecPath)) {
       "'SWIFT_COMPILATION_MODE' => 'wholemodule',",
       "'SWIFT_COMPILATION_MODE' => 'wholemodule',\n    'SWIFT_CXX_INTEROPERABILITY_MODE' => 'default',"
     );
+  }
+  if (!content.includes("'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20'")) {
     content = content.replace(
-      "'OTHER_SWIFT_FLAGS' => \"$(inherited) ",
-      "'OTHER_SWIFT_FLAGS' => \"$(inherited) -cxx-interoperability-mode=default "
+      "'DEFINES_MODULE' => 'YES',",
+      "'DEFINES_MODULE' => 'YES',\n    'CLANG_CXX_LANGUAGE_STANDARD' => 'c++20',"
     );
   }
+  // Ensure OTHER_SWIFT_FLAGS includes both -cxx-interoperability-mode=default and -Xcc -std=c++20
+  content = content.replace(
+    /'OTHER_SWIFT_FLAGS'\s*=>\s*"\$\(inherited\)[^"]*"/,
+    `'OTHER_SWIFT_FLAGS' => "$(inherited) -cxx-interoperability-mode=default -Xcc -std=c++20 #{new_arch_enabled ? new_arch_compiler_flags : ''}"`
+  );
   fs.writeFileSync(expoModulesCorePodspecPath, content, 'utf8');
-  console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build with C++ interop');
+  console.log('[patch-ios] Successfully patched ExpoModulesCore.podspec to force source build with C++20 and C++ interop');
 } else {
   console.log('[patch-ios] ExpoModulesCore.podspec not found, skipping');
 }
 
-// 9. Ensure ExpoModulesJSI_Cxx and jsi Clang module maps exist in Pods/Headers/Public
+// 9. Patch C++20 headers in React Native with C++17 fallbacks for Clang module importer
+// When Swift imports ExpoModulesCore via -import-underlying-module, Clang compiles imported headers.
+// Providing C++17 compatibility fallbacks ensures that even if Clang parses in C++17 mode, no syntax errors occur.
+const yogaEnumsPath = path.resolve(__dirname, '../node_modules/react-native/ReactCommon/yoga/yoga/enums/YogaEnums.h');
+if (fs.existsSync(yogaEnumsPath)) {
+  let content = fs.readFileSync(yogaEnumsPath, 'utf8');
+  if (!content.includes('// Patched with C++17 fallback')) {
+    const patchedYogaEnums = `/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#pragma once
+
+// Patched with C++17 fallback for Swift Clang importer
+#include <iterator>
+#include <type_traits>
+
+#if defined(__cpp_lib_bitops) && __cpp_lib_bitops >= 201907L
+#include <bit>
+#endif
+
+namespace facebook::yoga {
+
+#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+
+template <typename EnumT>
+concept Enumeration = std::is_enum_v<EnumT>;
+
+template <Enumeration EnumT>
+constexpr int32_t ordinalCount();
+
+template <typename EnumT>
+concept HasOrdinality = (ordinalCount<EnumT>() > 0);
+
+template <HasOrdinality EnumT>
+constexpr int32_t bitCount() {
+  return std::bit_width(
+      static_cast<std::underlying_type_t<EnumT>>(ordinalCount<EnumT>() - 1));
+}
+
+constexpr auto to_underlying(Enumeration auto e) noexcept {
+  return static_cast<std::underlying_type_t<decltype(e)>>(e);
+}
+
+template <HasOrdinality EnumT>
+auto ordinals() {
+  struct Iterator {
+    EnumT e{};
+
+    EnumT operator*() const {
+      return e;
+    }
+
+    Iterator& operator++() {
+      e = static_cast<EnumT>(to_underlying(e) + 1);
+      return *this;
+    }
+
+    bool operator==(const Iterator& other) const = default;
+  };
+
+  struct Range {
+    Iterator begin() const {
+      return Iterator{};
+    }
+    Iterator end() const {
+      return Iterator{static_cast<EnumT>(ordinalCount<EnumT>())};
+    }
+  };
+
+  return Range{};
+}
+
+#else
+
+template <typename EnumT>
+constexpr int32_t ordinalCount();
+
+template <typename EnumT>
+constexpr int32_t bitCount() {
+  uint32_t x = static_cast<std::underlying_type_t<EnumT>>(ordinalCount<EnumT>() - 1);
+  return x == 0 ? 0 : 32 - __builtin_clz(x);
+}
+
+template <typename EnumT>
+constexpr auto to_underlying(EnumT e) noexcept {
+  return static_cast<std::underlying_type_t<EnumT>>(e);
+}
+
+template <typename EnumT>
+auto ordinals() {
+  struct Iterator {
+    EnumT e{};
+
+    EnumT operator*() const {
+      return e;
+    }
+
+    Iterator& operator++() {
+      e = static_cast<EnumT>(to_underlying(e) + 1);
+      return *this;
+    }
+
+    bool operator==(const Iterator& other) const {
+      return e == other.e;
+    }
+    bool operator!=(const Iterator& other) const {
+      return e != other.e;
+    }
+  };
+
+  struct Range {
+    Iterator begin() const {
+      return Iterator{};
+    }
+    Iterator end() const {
+      return Iterator{static_cast<EnumT>(ordinalCount<EnumT>())};
+    }
+  };
+
+  return Range{};
+}
+
+#endif
+
+} // namespace facebook::yoga
+`;
+    fs.writeFileSync(yogaEnumsPath, patchedYogaEnums, 'utf8');
+    console.log('[patch-ios] Successfully patched YogaEnums.h with C++17 fallback');
+  }
+}
+
+const fnv1aPath = path.resolve(__dirname, '../node_modules/react-native/ReactCommon/react/utils/fnv1a.h');
+if (fs.existsSync(fnv1aPath)) {
+  let content = fs.readFileSync(fnv1aPath, 'utf8');
+  if (!content.includes('// Patched with C++17 fallback')) {
+    const patchedFnv1a = `/*
+ * Copyright (c) Meta Platforms, Inc. and affiliates.
+ *
+ * This source code is licensed under the MIT license found in the
+ * LICENSE file in the root directory of this source tree.
+ */
+
+#pragma once
+
+// Patched with C++17 fallback
+#include <cstdint>
+#include <functional>
+#include <string_view>
+#include <utility>
+
+#include <react/utils/toLower.h>
+
+namespace facebook::react {
+
+#if __cplusplus >= 202002L && defined(__cpp_lib_identity)
+template <typename CharTransformT = std::identity>
+#else
+struct Fnv1aIdentity {
+  template <typename T>
+  constexpr auto&& operator()(T&& val) const noexcept {
+    return std::forward<T>(val);
+  }
+};
+template <typename CharTransformT = Fnv1aIdentity>
+#endif
+constexpr uint32_t fnv1a(std::string_view string) noexcept
+{
+  constexpr uint32_t offset_basis = 2166136261;
+
+  uint32_t hash = offset_basis;
+
+  for (const auto &c : string) {
+    hash ^= static_cast<int8_t>(CharTransformT{}(c));
+    hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+  }
+
+  return hash;
+}
+
+} // namespace facebook::react
+`;
+    fs.writeFileSync(fnv1aPath, patchedFnv1a, 'utf8');
+    console.log('[patch-ios] Successfully patched fnv1a.h with C++17 fallback');
+  }
+}
+
+const rawPropsPath = path.resolve(__dirname, '../node_modules/react-native/ReactCommon/react/renderer/core/RawProps.h');
+if (fs.existsSync(rawPropsPath)) {
+  let content = fs.readFileSync(rawPropsPath, 'utf8');
+  if (content.includes('concept RawPropsFilterable = requires') && !content.includes('#if defined(__cpp_concepts)')) {
+    content = content.replace(
+      /template <typename T>\s*concept RawPropsFilterable = requires\(RawProps &rawProps\) \{\s*\{ T::filterRawProps\(rawProps\) \} -> std::same_as<void>;\s*\};/,
+      `#if defined(__cpp_concepts) && __cpp_concepts >= 201907L
+template <typename T>
+concept RawPropsFilterable = requires(RawProps &rawProps) {
+  { T::filterRawProps(rawProps) } -> std::same_as<void>;
+};
+#else
+template <typename T, typename = void>
+struct is_raw_props_filterable : std::false_type {};
+template <typename T>
+struct is_raw_props_filterable<T, std::void_t<decltype(T::filterRawProps(std::declval<RawProps&>()))>> : std::true_type {};
+template <typename T>
+constexpr bool RawPropsFilterable = is_raw_props_filterable<T>::value;
+#endif`
+    );
+    fs.writeFileSync(rawPropsPath, content, 'utf8');
+    console.log('[patch-ios] Successfully patched RawProps.h with C++17 SFINAE fallback');
+  }
+}
+
+// 10. Ensure ExpoModulesJSI_Cxx and jsi Clang module maps exist in Pods/Headers/Public
 const publicHeadersDir = path.resolve(__dirname, '../ios/Pods/Headers/Public');
 if (fs.existsSync(publicHeadersDir)) {
   const cxxDir = path.join(publicHeadersDir, 'ExpoModulesJSI_Cxx');
@@ -300,5 +541,45 @@ if (fs.existsSync(publicHeadersDir)) {
   console.log('[patch-ios] ios/Pods/Headers/Public does not exist yet (prebuild not run yet or run later)');
 }
 
-console.log('[patch-ios] Done patching.');
+// 11. Patch all generated .xcconfig files in ios/Pods/Target Support Files
+const targetSupportDir = path.resolve(__dirname, '../ios/Pods/Target Support Files');
+if (fs.existsSync(targetSupportDir)) {
+  function patchXcconfigFiles(dir) {
+    const entries = fs.readdirSync(dir, { withFileTypes: true });
+    for (const entry of entries) {
+      const fullPath = path.join(dir, entry.name);
+      if (entry.isDirectory()) {
+        patchXcconfigFiles(fullPath);
+      } else if (entry.name.endsWith('.xcconfig')) {
+        let text = fs.readFileSync(fullPath, 'utf8');
+        let changed = false;
 
+        if (!text.includes('CLANG_CXX_LANGUAGE_STANDARD')) {
+          text += '\nCLANG_CXX_LANGUAGE_STANDARD = c++20\n';
+          changed = true;
+        }
+        if (!text.includes('SWIFT_CXX_INTEROPERABILITY_MODE')) {
+          text += '\nSWIFT_CXX_INTEROPERABILITY_MODE = default\n';
+          changed = true;
+        }
+        if (text.includes('OTHER_SWIFT_FLAGS =')) {
+          if (!text.includes('-cxx-interoperability-mode')) {
+            text = text.replace('OTHER_SWIFT_FLAGS =', 'OTHER_SWIFT_FLAGS = -cxx-interoperability-mode=default');
+            changed = true;
+          }
+          if (!text.includes('-std=c++20')) {
+            text = text.replace('OTHER_SWIFT_FLAGS =', 'OTHER_SWIFT_FLAGS = -Xcc -std=c++20');
+            changed = true;
+          }
+        }
+        if (changed) {
+          fs.writeFileSync(fullPath, text, 'utf8');
+        }
+      }
+    }
+  }
+  patchXcconfigFiles(targetSupportDir);
+  console.log('[patch-ios] Successfully patched all Pods Target Support Files .xcconfig files with C++20 and C++ interop flags');
+}
+
+console.log('[patch-ios] Done patching.');
