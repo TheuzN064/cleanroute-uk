@@ -722,15 +722,43 @@ function patchFileSystemFiles(dir) {
       if (entry.name !== '.git') {
         patchFileSystemFiles(fullPath);
       }
-    } else if (entry.name === 'FileSystemHelpers.swift' || entry.name === 'FileSystemLegacyModule.swift') {
+    } else if (entry.name === 'FileSystemHelpers.swift') {
       let content = fs.readFileSync(fullPath, 'utf8');
-      if (!content.includes('typealias EXFileSystemPermissionFlags = ExpoModulesCore.EXFileSystemPermissionFlags')) {
-        content = content.replace(
-          'import ExpoModulesCore',
-          'import ExpoModulesCore\n\ntypealias EXFileSystemPermissionFlags = ExpoModulesCore.EXFileSystemPermissionFlags'
-        );
+      let changed = false;
+      if (/typealias EXFileSystemPermissionFlags = ExpoModulesCore\.EXFileSystemPermissionFlags\r?\n?/.test(content)) {
+        content = content.replace(/typealias EXFileSystemPermissionFlags = ExpoModulesCore\.EXFileSystemPermissionFlags\r?\n?/g, '');
+        changed = true;
+      }
+      if (content.includes('flag: EXFileSystemPermissionFlags')) {
+        content = content.replace('flag: EXFileSystemPermissionFlags', 'flag: ExpoModulesCore.EXFileSystemPermissionFlags');
+        changed = true;
+      }
+      if (content.includes('flag == .read')) {
+        content = content.replace('flag == .read', 'flag == ExpoModulesCore.EXFileSystemPermissionFlags.read');
+        changed = true;
+      }
+      if (changed) {
         fs.writeFileSync(fullPath, content, 'utf8');
-        console.log(`[patch-ios] Successfully patched ${entry.name} with explicit EXFileSystemPermissionFlags typealias`);
+        console.log('[patch-ios] Successfully patched FileSystemHelpers.swift with explicit ExpoModulesCore.EXFileSystemPermissionFlags');
+      }
+    } else if (entry.name === 'FileSystemLegacyModule.swift') {
+      let content = fs.readFileSync(fullPath, 'utf8');
+      let changed = false;
+      if (/typealias EXFileSystemPermissionFlags = ExpoModulesCore\.EXFileSystemPermissionFlags\r?\n?/.test(content)) {
+        content = content.replace(/typealias EXFileSystemPermissionFlags = ExpoModulesCore\.EXFileSystemPermissionFlags\r?\n?/g, '');
+        changed = true;
+      }
+      if (content.includes('flag: .read')) {
+        content = content.replaceAll('flag: .read', 'flag: ExpoModulesCore.EXFileSystemPermissionFlags.read');
+        changed = true;
+      }
+      if (content.includes('flag: .write')) {
+        content = content.replaceAll('flag: .write', 'flag: ExpoModulesCore.EXFileSystemPermissionFlags.write');
+        changed = true;
+      }
+      if (changed) {
+        fs.writeFileSync(fullPath, content, 'utf8');
+        console.log('[patch-ios] Successfully patched FileSystemLegacyModule.swift with explicit ExpoModulesCore.EXFileSystemPermissionFlags members');
       }
     }
   }
