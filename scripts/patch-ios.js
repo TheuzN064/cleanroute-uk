@@ -449,7 +449,7 @@ auto ordinals() {
 const fnv1aPath = path.resolve(__dirname, '../node_modules/react-native/ReactCommon/react/utils/fnv1a.h');
 if (fs.existsSync(fnv1aPath)) {
   let content = fs.readFileSync(fnv1aPath, 'utf8');
-  if (!content.includes('// Patched with C++17 fallback')) {
+  if (!content.includes('fnv1aLowercase') || !content.includes('// Patched with C++17 fallback')) {
     const patchedFnv1a = `/*
  * Copyright (c) Meta Platforms, Inc. and affiliates.
  *
@@ -491,15 +491,27 @@ constexpr uint32_t fnv1a(std::string_view string) noexcept
     hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
   }
 
-  return hash;
-}
-
-} // namespace facebook::react
-`;
-    fs.writeFileSync(fnv1aPath, patchedFnv1a, 'utf8');
-    console.log('[patch-ios] Successfully patched fnv1a.h with C++17 fallback');
+    return hash;
   }
-}
+
+  constexpr uint32_t fnv1aLowercase(std::string_view string)
+  {
+    struct LowerCaseTransform {
+      constexpr char operator()(char c) const
+      {
+        return toLower(c);
+      }
+    };
+
+    return fnv1a<LowerCaseTransform>(string);
+  }
+
+  } // namespace facebook::react
+  `;
+      fs.writeFileSync(fnv1aPath, patchedFnv1a, 'utf8');
+      console.log('[patch-ios] Successfully patched fnv1a.h with C++17 fallback and fnv1aLowercase');
+    }
+  }
 
 const rawPropsPath = path.resolve(__dirname, '../node_modules/react-native/ReactCommon/react/renderer/core/RawProps.h');
 if (fs.existsSync(rawPropsPath)) {
